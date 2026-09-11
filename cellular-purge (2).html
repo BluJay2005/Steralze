@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CELLULAR PURGE // beta</title>
+<style>
+  * { box-sizing: border-box; -webkit-user-select:none; user-select:none; }
+  html,body {
+    margin:0; padding:0; width:100%; height:100%; background:#000;
+    display:flex; align-items:center; justify-content:center;
+    font-family: 'Courier New', monospace; overflow:hidden;
+  }
+  #gameContainer {
+    position:relative;
+    width:min(96vw, 960px);
+    aspect-ratio: 8/5;
+    background:#000;
+    box-shadow: 0 0 40px #ff00ff55, 0 0 80px #00ffff33, inset 0 0 0 2px #1a1a1a;
+    border:2px solid #222;
+  }
+  canvas#game {
+    width:100%; height:100%; display:block;
+    image-rendering:pixelated; image-rendering:crisp-edges;
+    cursor:crosshair;
+  }
+  .overlay {
+    position:absolute; inset:0;
+    background:radial-gradient(ellipse at center, #0a0014 0%, #000000 85%);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; padding:20px; z-index:10;
+  }
+  .hidden { display:none !important; }
+  .neonTitle {
+    font-size:clamp(22px,4.5vw,42px);
+    font-weight:bold; letter-spacing:4px; margin:0 0 6px 0;
+    color:#fff;
+    text-shadow: 0 0 6px #fff, 0 0 16px #ff00ff, 0 0 32px #ff00ff, 0 0 48px #00ffff;
+    animation: flicker 2.6s infinite;
+  }
+  @keyframes flicker {
+    0%,19%,21%,23%,25%,54%,56%,100% { opacity:1; }
+    20%,24%,55% { opacity:0.78; }
+  }
+  .subTitle { color:#00ffff; letter-spacing:2px; font-size:clamp(10px,1.6vw,14px); margin-bottom:18px; text-shadow:0 0 8px #00ffff; }
+  .instructions { color:#ddd; font-size:clamp(10px,1.4vw,13px); line-height:1.9; max-width:520px; margin-bottom:22px; }
+  .instructions b { color:#ff00ff; text-shadow:0 0 6px #ff00ff; }
+  .instructions span.key { color:#00ffff; border:1px solid #00ffff33; padding:1px 6px; border-radius:3px; }
+  button.neonBtn {
+    background:#000; color:#00ffff; border:2px solid #00ffff;
+    padding:12px 30px; font-family:inherit; font-weight:bold; letter-spacing:3px;
+    font-size:clamp(12px,1.8vw,16px); cursor:pointer; text-shadow:0 0 8px #00ffff;
+    box-shadow:0 0 12px #00ffff55; transition:all .15s;
+  }
+  button.neonBtn:hover { background:#00ffff; color:#000; box-shadow:0 0 24px #00ffff; }
+  .endTitleWin { color:#00ff99; text-shadow:0 0 10px #00ff99, 0 0 28px #00ff99; }
+  .endTitleLose { color:#ff0033; text-shadow:0 0 10px #ff0033, 0 0 28px #ff0033; }
+  .stats { color:#fff; margin:14px 0 22px 0; font-size:clamp(11px,1.6vw,14px); line-height:1.8; }
+  .stats span { color:#ff00ff; }
+</style>
+</head>
+<body>
+<div id="gameContainer">
+  <canvas id="game" width="480" height="300"></canvas>
+
+  <div id="startOverlay" class="overlay">
+    <div class="neonTitle">CELLULAR PURGE</div>
+    <div class="subTitle">— beta build —</div>
+    <div class="instructions">
+      You are the <b>medicine</b>. A viral infection has bloomed inside the body.<br>
+      Cleanse every germ before the <b>60 second</b> infection clock runs out — or the host is lost.<br><br>
+      <span class="key">W A S D</span> move &nbsp;•&nbsp; <span class="key">MOUSE</span> look &nbsp;•&nbsp;
+      <span class="key">CLICK</span> / <span class="key">SPACE</span> fire<br>
+      Walk over glowing pickups: <b>Tylenol</b> (defense), <b>Stimulant</b> (speed), <b>Nyquil</b> (slows germs).<br>
+      Clearing 20/40/60/80% of the outbreak permanently upgrades you — health, fire rate, max HP, damage.<br>
+      Every few seconds your heartbeat pings the map — watch the radar, top right.
+    </div>
+    <button class="neonBtn" id="startBtn">CLICK TO INFECT</button>
+  </div>
+
+  <div id="endOverlay" class="overlay hidden">
+    <div class="neonTitle" id="endTitle"></div>
+    <div class="stats" id="endStats"></div>
+    <button class="neonBtn" id="restartBtn">RETRY PURGE</button>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+// ---------- CANVAS SETUP ----------
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+// ---------- MAP ----------
+const SIZE = 15;
+let MAP = [];
+for (let y=0;y<SIZE;y++){
+  const row=[];
+  for (let x=0;x<SIZE;x++){
+    let wall=0;
+    if (x===0||y===0||x===SIZE-1||y===SIZE-1) wall=1;
+    row.push(wall);
+  }
+  MAP.push(row);
+}
+// Interior pillars only - a single open arena (chambers blend into one
+// bloodstream cavity) so there is never a sealed-off pocket to get stuck in.
+const PILLARS = [[3,3],[11,3],[3,11],[11,11],[5,5],[9,5],[5,9],[9,9],[7,2],[7,12],[2,7],[12,7]];
+PILLARS.forEach(([x,y])=>{ if (MAP[y][x]===0) MAP[y][x]=1; });
+function isWall(x,y){
+  const mx=Math.floor(x), my=Math.floor(y);
+  if (my<0||my>=SIZE||mx<0||mx>=SIZE) return true;
+  return MAP[my][mx]===1;
+}
+// Connectivity safety net: flood-fill from the player spawn and log a
+// warning if any open tile is unreachable, so future map edits can't
+// silently trap the player again.
+(function verifyConnectivity(){
+  const seen = Array.from({length:SIZE},()=>new Array(SIZE).fill(false));
+  const stack = [[7,7]];
+  seen[7][7]=true;
+  while (stack.length){
+    const [cx,cy]=stack.pop();
+    [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx,dy])=>{
+      const nx=cx+dx, ny=cy+dy;
+      if (nx<0||ny<0||nx>=SIZE||ny>=SIZE) return;
+      if (MAP[ny][nx]===1 || seen[ny][nx]) return;
+      seen[ny][nx]=true; stack.push([nx,ny]);
+    });
+  }
+  for (let y=0;y<SIZE;y++) for (let x=0;x<SIZE;x++){
+    if (MAP[y][x]===0 && !seen[y][x]) console.warn('Unreachable open tile at', x, y);
+  }
+})();
+function findOpenSpot(x,y){
+  if (!isWall(x,y)) return {x,y};
+  for (let r=0;r<14;r++){
+    const ang = Math.random()*Math.PI*2;
+    const rad = 0.6 + r*0.35;
+    const nx = x+Math.cos(ang)*rad, ny = y+Math.sin(ang)*rad;
+    if (!isWall(nx,ny)) return {x:nx,y:ny};
+  }
+  return {x:7.5,y:7.5};
+}
+const ROOM_CENTERS = [ {x:4.5,y:2.5},{x:10.5,y:2.5},{x:4.5,y:12.5},{x:10.5,y:12.5} ];
+const SAFE_SPAWNS = [ {x:2.5,y:2.5},{x:12.5,y:2.5},{x:2.5,y:12.5},{x:12.5,y:12.5} ];
+
+// ---------- CONSTANTS ----------
+const FOV = 1.35;
+const MAX_ENEMIES = 44;
+const ENEMY_TYPES = {
+  virus:    { hp:34,  speed:1.3, dmg:6,  radius:0.32, color:'#FF00FF' },
+  bacteria: { hp:90,  speed:0.8, dmg:10, radius:0.4,  color:'#00FFFF' },
+  spore:    { hp:20,  speed:2.2, dmg:4,  radius:0.24, color:'#FFFFFF' },
+};
+
+// ---------- AUDIO (synth, no files) ----------
+let actx=null;
+function initAudio(){ try{ actx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+function beep(freq,dur,type,vol,glideTo){
+  if(!actx) return;
+  try{
+    const o=actx.createOscillator(), g=actx.createGain();
+    o.type=type||'square'; o.frequency.setValueAtTime(freq,actx.currentTime);
+    if(glideTo) o.frequency.exponentialRampToValueAtTime(glideTo, actx.currentTime+dur);
+    g.gain.setValueAtTime(vol||0.15, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime+dur);
+    o.connect(g); g.connect(actx.destination);
+    o.start(); o.stop(actx.currentTime+dur);
+  }catch(e){}
+}
+const sfxShoot = ()=>beep(880,0.07,'square',0.12,220);
+const sfxHit   = ()=>beep(180,0.08,'sawtooth',0.14,60);
+const sfxDeath = ()=>beep(320,0.18,'sawtooth',0.16,40);
+const sfxPickup= ()=>beep(660,0.12,'sine',0.16,1200);
+const sfxHeart = ()=>beep(90,0.14,'sine',0.22,60);
+const sfxHurt  = ()=>beep(140,0.12,'square',0.18,50);
+
+// ---------- STATE ----------
+let player, enemies, pickups, particles, zBuffer;
+let elapsed, running, ended, pointerLocked;
+let nextBloomTime, nextPingTime, nextPickupTime, pulseAlpha, bigBloomDone, climaxDone;
+let walkCycle, muzzleFlash, weaponRecoil, shakeMag, killCount, spawnCount, enemyIdSeed;
+let lastShotTime, milestonesHit, milestoneMsg, milestoneMsgTimer;
+
+function resetState(){
+  player = {
+    x:7.5, y:7.5, angle:-Math.PI/2,
+    health:100, maxHealth:100,
+    speed:3.0, speedMult:1, defenseMult:1,
+    tylenolTimer:0, stimTimer:0, tilt:0,
+    fireRate:0.22, bulletDamage:34
+  };
+  enemies=[]; pickups=[]; particles=[];
+  zBuffer=new Array(W).fill(99);
+  elapsed=0; running=false; ended=false;
+  nextBloomTime=3.5; nextPingTime=2; nextPickupTime=8;
+  pulseAlpha=0; bigBloomDone=false; climaxDone=false;
+  walkCycle=0; muzzleFlash=0; weaponRecoil=0; shakeMag=0;
+  killCount=0; spawnCount=0; enemyIdSeed=1; lastShotTime=-99;
+  milestonesHit = new Set(); milestoneMsg=''; milestoneMsgTimer=0;
+
+  // Start with an active outbreak already spread across the body, not one
+  // lonely virus - otherwise a single kill would end the run in seconds.
+  spawnEnemy('virus', SAFE_SPAWNS[0].x, SAFE_SPAWNS[0].y);
+  spawnEnemy('virus', SAFE_SPAWNS[1].x, SAFE_SPAWNS[1].y);
+  spawnEnemy('virus', SAFE_SPAWNS[2].x, SAFE_SPAWNS[2].y);
+  spawnEnemy('virus', SAFE_SPAWNS[3].x, SAFE_SPAWNS[3].y);
+  spawnEnemy('virus', 7.5, 3.5);
+  spawnEnemy('virus', 7.5, 11.5);
+}
+
+function spawnEnemy(type, x, y){
+  if (enemies.filter(e=>e.alive).length >= MAX_ENEMIES) return;
+  const spot = findOpenSpot(x,y);
+  x = spot.x; y = spot.y;
+  const def = ENEMY_TYPES[type];
+  enemies.push({
+    id: enemyIdSeed++,
+    type, x, y, hp:def.hp, maxHp:def.hp,
+    speed:def.speed, dmg:def.dmg, radius:def.radius,
+    alive:true, slowTimer:0, hitCooldown:0, wanderAngle:Math.random()*Math.PI*2,
+    _screenX:W/2,_screenY:H/2,_screenSize:0
+  });
+  spawnCount++;
+}
+
+function spawnEnemyNear(e){
+  for (let tries=0; tries<8; tries++){
+    const ang = Math.random()*Math.PI*2;
+    const dist = 0.8 + Math.random()*0.9;
+    const nx = e.x + Math.cos(ang)*dist;
+    const ny = e.y + Math.sin(ang)*dist;
+    if (!isWall(nx,ny)){
+      spawnEnemy(e.type, nx, ny);
+      return;
+    }
+  }
+}
+
+// ---------- INPUT ----------
+const keys = {};
+window.addEventListener('keydown', e=>{
+  keys[e.code]=true;
+  if (e.code==='Space'){ e.preventDefault(); if(running) tryShoot(); }
+});
+window.addEventListener('keyup', e=>{ keys[e.code]=false; });
+
+canvas.addEventListener('click', ()=>{
+  if (running && pointerLocked) tryShoot();
+});
+canvas.addEventListener('mousemove', e=>{
+  if (!pointerLocked || !running) return;
+  player.angle += (e.movementX||0) * 0.0026;
+});
+document.addEventListener('pointerlockchange', ()=>{
+  pointerLocked = document.pointerLockElement === canvas;
+  if (!pointerLocked && running && !ended){
+    running=false;
+    document.getElementById('startOverlay').classList.remove('hidden');
+    document.getElementById('startBtn').textContent='CLICK TO RESUME';
+  }
+});
+
+// ---------- RAYCAST ----------
+function castRay(angle){
+  const dirX=Math.cos(angle), dirY=Math.sin(angle);
+  let mapX=Math.floor(player.x), mapY=Math.floor(player.y);
+  const deltaDistX=Math.abs(1/dirX), deltaDistY=Math.abs(1/dirY);
+  let stepX,stepY,sideDistX,sideDistY;
+  if (dirX<0){ stepX=-1; sideDistX=(player.x-mapX)*deltaDistX; } else { stepX=1; sideDistX=(mapX+1-player.x)*deltaDistX; }
+  if (dirY<0){ stepY=-1; sideDistY=(player.y-mapY)*deltaDistY; } else { stepY=1; sideDistY=(mapY+1-player.y)*deltaDistY; }
+  let hit=0, side=0, safety=0;
+  while (hit===0 && safety<64){
+    safety++;
+    if (sideDistX<sideDistY){ sideDistX+=deltaDistX; mapX+=stepX; side=0; }
+    else { sideDistY+=deltaDistY; mapY+=stepY; side=1; }
+    if (mapY<0||mapY>=SIZE||mapX<0||mapX>=SIZE || MAP[mapY][mapX]===1) hit=1;
+  }
+  let dist;
+  if (side===0) dist=(mapX-player.x+(1-stepX)/2)/dirX;
+  else dist=(mapY-player.y+(1-stepY)/2)/dirY;
+  return { dist:Math.max(dist,0.05), side };
+}
+
+function drawScene(){
+  const pulse = 0.9 + 0.1*Math.sin(elapsed*7.2); // slow heartbeat throb through the tissue
+
+  const ceilGrad = ctx.createLinearGradient(0,0,0,H/2);
+  ceilGrad.addColorStop(0,'#1a0000');
+  ceilGrad.addColorStop(1,'#3a0006');
+  ctx.fillStyle=ceilGrad;
+  ctx.fillRect(0,0,W,H/2);
+
+  const floorGrad = ctx.createLinearGradient(0,H/2,0,H);
+  floorGrad.addColorStop(0,`rgba(90,0,10,${pulse})`);
+  floorGrad.addColorStop(1,'#0a0000');
+  ctx.fillStyle=floorGrad;
+  ctx.fillRect(0,H/2,W,H/2);
+
+  for (let col=0; col<W; col++){
+    const rayAngle = player.angle - FOV/2 + FOV*col/W;
+    const r = castRay(rayAngle);
+    const corrected = r.dist*Math.cos(rayAngle-player.angle);
+    zBuffer[col]=corrected;
+    const wallHeight = Math.min(H*3,(H/corrected)*0.85);
+    const drawStart = (H-wallHeight)/2;
+    const fog = Math.max(0.18, 1-corrected/11) * pulse;
+    // fleshy vessel-wall tones: bright arterial red (near side) vs deep venous red (far side)
+    let base = r.side===0 ? [255,40,40] : [150,10,10];
+    ctx.fillStyle = `rgb(${Math.floor(base[0]*fog)},${Math.floor(base[1]*fog)},${Math.floor(base[2]*fog)})`;
+    ctx.fillRect(col, drawStart, 1, wallHeight);
+    if (col%3===0){
+      ctx.fillStyle=`rgba(0,0,0,${0.5*fog})`;
+      ctx.fillRect(col, drawStart, 1, 1.4);
+      ctx.fillRect(col, drawStart+wallHeight-1.4, 1, 1.4);
+    }
+  }
+}
+
+// ---------- SPRITES ----------
+function worldToScreen(x,y){
+  const dx=x-player.x, dy=y-player.y;
+  const dist=Math.sqrt(dx*dx+dy*dy);
+  let a=Math.atan2(dy,dx)-player.angle;
+  while (a>Math.PI) a-=Math.PI*2;
+  while (a<-Math.PI) a+=Math.PI*2;
+  const corrected = dist*Math.cos(a);
+  const screenX = (W/2)*(1+a/(FOV/2));
+  return { a, dist, corrected, screenX };
+}
+
+function drawSprites(){
+  const sprites = [];
+  enemies.forEach(e=>{ if(e.alive) sprites.push({obj:e, kind:'enemy'}); });
+  pickups.forEach(p=>{ if(!p.taken) sprites.push({obj:p, kind:'pickup'}); });
+  sprites.forEach(s=>{
+    const dx=s.obj.x-player.x, dy=s.obj.y-player.y;
+    s._d = dx*dx+dy*dy;
+  });
+  sprites.sort((a,b)=>b._d-a._d);
+
+  sprites.forEach(s=>{
+    const o=s.obj;
+    const proj = worldToScreen(o.x,o.y);
+    if (Math.abs(proj.a) > FOV/2+0.35) return;
+    if (proj.corrected < 0.15) return;
+    const col = Math.max(0, Math.min(W-1, Math.floor(proj.screenX)));
+    if (proj.corrected > zBuffer[col]+0.15) return;
+    const size = Math.min(H*2.4, (H/proj.corrected) * (o.radius||0.4) * 2.0);
+    o._screenX = proj.screenX; o._screenY = H/2; o._screenSize = size;
+    if (s.kind==='enemy') drawEnemySprite(o, proj.screenX, H/2 + Math.sin(o.id)*2, size);
+    else drawPickupSprite(o, proj.screenX, H/2, size*0.7);
+  });
+}
+
+function drawEnemySprite(e, sx, sy, size){
+  const pulse = 1+Math.sin(Date.now()/130 + e.id)*0.07;
+  const r = (size/2)*pulse;
+  ctx.save();
+  ctx.translate(sx, sy);
+  ctx.shadowBlur = 13;
+  if (e.type==='virus'){
+    ctx.shadowColor='#FF00FF'; ctx.fillStyle='#FF00FF'; ctx.strokeStyle='#000';
+    ctx.lineWidth=Math.max(1,size*0.035);
+    ctx.beginPath(); ctx.arc(0,0,r*0.58,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    for (let i=0;i<8;i++){
+      const a=(i/8)*Math.PI*2 + Date.now()/900;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a)*r*0.58, Math.sin(a)*r*0.58);
+      ctx.lineTo(Math.cos(a)*r*1.05, Math.sin(a)*r*1.05);
+      ctx.lineWidth=Math.max(1,size*0.09); ctx.strokeStyle='#FF00FF'; ctx.stroke();
+    }
+  } else if (e.type==='bacteria'){
+    ctx.shadowColor='#00FFFF'; ctx.fillStyle='#00FFFF'; ctx.strokeStyle='#000';
+    ctx.lineWidth=Math.max(1,size*0.04);
+    ctx.beginPath(); ctx.ellipse(0,0,r*0.42,r*0.95,Math.sin(Date.now()/500)*0.15,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle='#00FFFF'; ctx.lineWidth=Math.max(1,size*0.03);
+    for(let i=-1;i<=1;i+=2){
+      ctx.beginPath(); ctx.moveTo(0, r*0.9*i*0.2);
+      ctx.quadraticCurveTo(r*0.9*i, r*0.5*i, r*1.3*i, r*0.9*i);
+      ctx.stroke();
+    }
+  } else {
+    ctx.shadowColor='#FFFFFF'; ctx.fillStyle='#FFFFFF'; ctx.strokeStyle='#FF0000';
+    ctx.lineWidth=Math.max(1,size*0.06);
+    ctx.beginPath();
+    ctx.moveTo(0,-r*0.75); ctx.lineTo(r*0.62,r*0.5); ctx.lineTo(-r*0.62,r*0.5); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+  }
+  ctx.shadowBlur=0;
+  if (e.hp < e.maxHp){
+    ctx.fillStyle='#000'; ctx.fillRect(-r*0.7, -r*1.25, r*1.4, r*0.2);
+    ctx.fillStyle='#00ff66'; ctx.fillRect(-r*0.7, -r*1.25, r*1.4*Math.max(0,e.hp/e.maxHp), r*0.2);
+  }
+  ctx.restore();
+}
+
+const PICKUP_STYLE = {
+  tylenol: {color:'#00FFFF', label:'+'},
+  stim:    {color:'#FFFF00', label:'\u26A1'},
+  nyquil:  {color:'#AA66FF', label:'Z'},
+};
+function drawPickupSprite(p, sx, sy, size){
+  const bob = Math.sin(Date.now()/220 + p.id)*4;
+  const style = PICKUP_STYLE[p.type];
+  ctx.save();
+  ctx.translate(sx, sy+bob);
+  ctx.shadowBlur=16; ctx.shadowColor=style.color;
+  ctx.fillStyle='#000'; ctx.strokeStyle=style.color; ctx.lineWidth=Math.max(1,size*0.08);
+  ctx.beginPath(); ctx.arc(0,0,size/2,0,Math.PI*2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle=style.color; ctx.font=`bold ${Math.floor(size*0.6)}px monospace`;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(style.label,0,1);
+  ctx.restore();
+}
+
+// ---------- PARTICLES ----------
+function burst(sx,sy,color,n){
+  for (let i=0;i<n;i++){
+    particles.push({
+      x:sx, y:sy,
+      vx:(Math.random()-0.5)*160, vy:(Math.random()-0.5)*160,
+      life:0.4+Math.random()*0.3, color
+    });
+  }
+}
+function updateParticles(dt){
+  for (let i=particles.length-1;i>=0;i--){
+    const p=particles[i];
+    p.x+=p.vx*dt; p.y+=p.vy*dt; p.life-=dt;
+    if (p.life<=0) particles.splice(i,1);
+  }
+}
+function drawParticles(){
+  particles.forEach(p=>{
+    ctx.globalAlpha = Math.max(0,p.life/0.6);
+    ctx.fillStyle=p.color;
+    ctx.fillRect(p.x-2,p.y-2,4,4);
+  });
+  ctx.globalAlpha=1;
+}
+
+// ---------- WEAPON ----------
+function drawWeapon(){
+  const bobX = Math.sin(walkCycle*2)*7;
+  const bobY = Math.abs(Math.sin(walkCycle*2))*5;
+  ctx.save();
+  ctx.translate(W/2+bobX, H-6+bobY+weaponRecoil*16);
+  ctx.shadowBlur=12; ctx.shadowColor='#00FFFF';
+  ctx.fillStyle='#0a0a0a'; ctx.strokeStyle='#00FFFF'; ctx.lineWidth=3;
+  roundRectPath(-16,-78,32,78,7); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='#FF00FF'; ctx.strokeStyle='#000'; ctx.lineWidth=2;
+  ctx.fillRect(-7,-104,14,32); ctx.strokeRect(-7,-104,14,32);
+  ctx.fillStyle='#00FFFF';
+  ctx.fillRect(-3,-108,6,8);
+  if (muzzleFlash>0){
+    ctx.shadowColor='#FFFFFF';
+    ctx.fillStyle=`rgba(255,255,255,${muzzleFlash})`;
+    ctx.beginPath(); ctx.arc(0,-110,26*muzzleFlash,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle=`rgba(0,255,255,${muzzleFlash*0.8})`;
+    ctx.beginPath(); ctx.arc(0,-110,14*muzzleFlash,0,Math.PI*2); ctx.fill();
+  }
+  ctx.shadowBlur=0;
+  ctx.restore();
+}
+function roundRectPath(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+
+// ---------- HUD ----------
+function drawHUD(){
+  // health
+  ctx.fillStyle='#000'; ctx.fillRect(10,10,120,14);
+  ctx.strokeStyle='#fff'; ctx.lineWidth=1.5; ctx.strokeRect(10,10,120,14);
+  const hpPct = Math.max(0,player.health/player.maxHealth);
+  ctx.fillStyle = hpPct>0.4 ? '#00ff66' : '#ff0033';
+  ctx.fillRect(12,12,116*hpPct,10);
+  ctx.fillStyle='#fff'; ctx.font='bold 9px monospace'; ctx.textAlign='left';
+  ctx.fillText('HOST INTEGRITY', 10, 33);
+
+  // timer bar
+  const barW=200;
+  const tx=(W-barW)/2;
+  ctx.fillStyle='#000'; ctx.fillRect(tx,8,barW,12);
+  ctx.strokeStyle='#fff'; ctx.strokeRect(tx,8,barW,12);
+  const tPct = Math.min(1, elapsed/60);
+  const tColor = tPct<0.5 ? '#00ffff' : tPct<0.85 ? '#ffff00' : '#ff0033';
+  ctx.fillStyle=tColor;
+  ctx.fillRect(tx+1,9,(barW-2)*tPct,10);
+  ctx.fillStyle='#fff'; ctx.font='bold 10px monospace'; ctx.textAlign='center';
+  ctx.fillText(`INFECTION CLOCK ${Math.floor(elapsed)}/60`, W/2, 32);
+
+  const remaining = enemies.filter(e=>e.alive).length;
+  ctx.fillStyle='#ff00ff'; ctx.font='bold 10px monospace'; ctx.textAlign='center';
+  ctx.fillText(`GERMS ACTIVE: ${remaining}   PURGED: ${killCount}`, W/2, 44);
+
+  // upgrade icons
+  let ix = 10;
+  ctx.textAlign='left';
+  if (player.tylenolTimer>0){ drawBadge(ix,H-24,'#00FFFF','DEF'); ix+=48; }
+  if (player.stimTimer>0){ drawBadge(ix,H-24,'#FFFF00','SPD'); ix+=48; }
+
+  // radar
+  drawRadar();
+
+  // milestone banner
+  if (milestoneMsgTimer > 0){
+    const a = Math.min(1, milestoneMsgTimer/0.5);
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.font='bold 13px monospace'; ctx.textAlign='center';
+    ctx.shadowColor='#00ff99'; ctx.shadowBlur=14;
+    ctx.fillStyle='#00ff99';
+    ctx.fillText(milestoneMsg, W/2, H*0.28);
+    ctx.restore();
+  }
+}
+function drawBadge(x,y,color,text){
+  ctx.fillStyle='#000'; ctx.strokeStyle=color; ctx.lineWidth=1.5;
+  ctx.fillRect(x,y,42,16); ctx.strokeRect(x,y,42,16);
+  ctx.fillStyle=color; ctx.font='bold 9px monospace'; ctx.textAlign='center';
+  ctx.fillText(text, x+21, y+11);
+}
+function drawRadar(){
+  const rx=W-88, ry=8, rw=80, rh=80;
+  ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(rx,ry,rw,rh);
+  ctx.strokeStyle='#00ffff'; ctx.lineWidth=1.5; ctx.strokeRect(rx,ry,rw,rh);
+  const scale = rw/SIZE;
+  const cx = rx + (player.x)*scale, cy = ry + (player.y)*scale;
+  const camX = player.x*scale, camY = player.y*scale;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(rx,ry,rw,rh); ctx.clip();
+  ctx.translate(rx + rw/2 - camX, ry + rh/2 - camY);
+  for (let y=0;y<SIZE;y++) for (let x=0;x<SIZE;x++){
+    if (MAP[y][x]===1){ ctx.fillStyle='rgba(160,0,10,0.55)'; ctx.fillRect(x*scale,y*scale,scale,scale); }
+  }
+  enemies.forEach(e=>{
+    if (!e.alive) return;
+    const a = Math.max(0.12, pulseAlpha);
+    ctx.globalAlpha=a;
+    ctx.fillStyle = ENEMY_TYPES[e.type].color;
+    ctx.beginPath(); ctx.arc(e.x*scale,e.y*scale,2.4,0,Math.PI*2); ctx.fill();
+  });
+  ctx.globalAlpha=1;
+  ctx.fillStyle='#fff';
+  ctx.beginPath();
+  ctx.arc(player.x*scale, player.y*scale, 2.6, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#fff'; ctx.lineWidth=1.4;
+  ctx.beginPath();
+  ctx.moveTo(player.x*scale, player.y*scale);
+  ctx.lineTo(player.x*scale+Math.cos(player.angle)*8, player.y*scale+Math.sin(player.angle)*8);
+  ctx.stroke();
+  ctx.restore();
+  if (pulseAlpha>0.05){
+    ctx.strokeStyle=`rgba(255,0,80,${pulseAlpha})`;
+    ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(rx+rw/2, ry+rh/2, (1-pulseAlpha)*40+4, 0, Math.PI*2); ctx.stroke();
+  }
+}
+
+// ---------- GAMEPLAY LOGIC ----------
+function tryShoot(){
+  if (elapsed - lastShotTime < player.fireRate) return;
+  lastShotTime = elapsed;
+  muzzleFlash = 1; weaponRecoil = 1; shakeMag = Math.max(shakeMag,4);
+  sfxShoot();
+  let best=null, bestAngle=0.16;
+  enemies.forEach(e=>{
+    if (!e.alive) return;
+    const proj = worldToScreen(e.x,e.y);
+    if (proj.corrected<0.2) return;
+    const col = Math.max(0,Math.min(W-1,Math.floor(proj.screenX)));
+    if (proj.corrected > zBuffer[col]+0.2) return;
+    if (Math.abs(proj.a) < bestAngle){
+      bestAngle = Math.abs(proj.a); best = e;
+    }
+  });
+  if (best){
+    best.hp -= player.bulletDamage;
+    sfxHit();
+    burst(best._screenX, best._screenY, ENEMY_TYPES[best.type].color, 6);
+    if (best.hp<=0){
+      best.alive=false; killCount++;
+      burst(best._screenX, best._screenY, '#ffffff', 12);
+      sfxDeath();
+    }
+  }
+}
+
+function hasLineOfSight(e){
+  const steps = 14;
+  for (let i=1;i<steps;i++){
+    const t=i/steps;
+    const x = e.x + (player.x-e.x)*t;
+    const y = e.y + (player.y-e.y)*t;
+    if (isWall(x,y)) return false;
+  }
+  return true;
+}
+
+function updateEnemies(dt){
+  enemies.forEach(e=>{
+    if (!e.alive) return;
+    if (e.slowTimer>0) e.slowTimer -= dt;
+    if (e.hitCooldown>0) e.hitCooldown -= dt;
+    const spd = e.speed * (e.slowTimer>0 ? 0.4 : 1) * (climaxDone?1.15:1);
+    const dx=player.x-e.x, dy=player.y-e.y;
+    const dist=Math.sqrt(dx*dx+dy*dy);
+
+    if (dist < e.radius+0.35){
+      if (e.hitCooldown<=0){
+        const dmg = e.dmg*player.defenseMult;
+        player.health -= dmg;
+        e.hitCooldown = 0.7;
+        shakeMag = Math.max(shakeMag,6);
+        sfxHurt();
+      }
+      return;
+    }
+
+    let moveAngle;
+    if (hasLineOfSight(e)){
+      moveAngle = Math.atan2(dy,dx);
+    } else {
+      e.wanderAngle += (Math.random()-0.5)*0.6;
+      moveAngle = e.wanderAngle;
+    }
+    const nx = e.x + Math.cos(moveAngle)*spd*dt;
+    const ny = e.y + Math.sin(moveAngle)*spd*dt;
+    if (!isWall(nx, e.y)) e.x = nx;
+    if (!isWall(e.x, ny)) e.y = ny;
+  });
+}
+
+function updateBloom(){
+  if (elapsed >= nextBloomTime){
+    const alive = enemies.filter(e=>e.alive);
+    alive.forEach(e=>{
+      if (Math.random() < 0.65 && enemies.filter(x=>x.alive).length < MAX_ENEMIES){
+        spawnEnemyNear(e);
+      }
+    });
+    // interval shrinks from ~4.5s down to ~1.4s as the clock runs, so the
+    // back half of the round is a real swarm, not a mop-up.
+    nextBloomTime += Math.max(1.4, 4.5 - elapsed/12);
+  }
+  if (elapsed >= 30 && !bigBloomDone){
+    bigBloomDone = true;
+    spawnEnemy('bacteria', ROOM_CENTERS[1].x, ROOM_CENTERS[1].y);
+    spawnEnemy('spore', ROOM_CENTERS[2].x, ROOM_CENTERS[2].y);
+    spawnEnemy('bacteria', ROOM_CENTERS[3].x, ROOM_CENTERS[3].y);
+    spawnEnemy('spore', ROOM_CENTERS[0].x-1, ROOM_CENTERS[0].y);
+    pulseAlpha = 1; shakeMag=8;
+  }
+  if (elapsed >= 55 && !climaxDone){
+    climaxDone = true;
+    for (let i=0;i<4;i++){
+      const s = SAFE_SPAWNS[i%SAFE_SPAWNS.length];
+      spawnEnemy(Math.random()<0.5?'virus':'spore', s.x+ (Math.random()-0.5), s.y+(Math.random()-0.5));
+    }
+  }
+}
+
+function updatePickups(dt){
+  if (elapsed >= nextPickupTime && pickups.filter(p=>!p.taken).length < 3){
+    nextPickupTime += 9 + Math.random()*4;
+    const room = ROOM_CENTERS[Math.floor(Math.random()*ROOM_CENTERS.length)];
+    const types = ['tylenol','stim','nyquil'];
+    const type = types[Math.floor(Math.random()*types.length)];
+    let px = room.x + (Math.random()-0.5)*1.6, py = room.y + (Math.random()-0.5)*1.6;
+    if (isWall(px,py)){ px=room.x; py=room.y; }
+    pickups.push({ id:enemyIdSeed++, type, x:px, y:py, taken:false });
+  }
+  pickups.forEach(p=>{
+    if (p.taken) return;
+    const dx=player.x-p.x, dy=player.y-p.y;
+    if (dx*dx+dy*dy < 0.32*0.32){
+      p.taken = true;
+      sfxPickup();
+      if (p.type==='tylenol'){ player.defenseMult=0.5; player.tylenolTimer=8; }
+      if (p.type==='stim'){ player.speedMult=1.7; player.stimTimer=8; }
+      if (p.type==='nyquil'){ enemies.forEach(e=>{ if(e.alive) e.slowTimer=6; }); }
+    }
+  });
+}
+
+function updateTimers(dt){
+  if (player.tylenolTimer>0){ player.tylenolTimer-=dt; if(player.tylenolTimer<=0) player.defenseMult=1; }
+  if (player.stimTimer>0){ player.stimTimer-=dt; if(player.stimTimer<=0) player.speedMult=1; }
+}
+
+function updateRadarPing(dt){
+  pulseAlpha = Math.max(0, pulseAlpha - dt*0.55);
+  if (elapsed >= nextPingTime){
+    pulseAlpha = 1;
+    nextPingTime += 4.2;
+    sfxHeart();
+  }
+}
+
+// ---------- MILESTONES ----------
+// Rewards are keyed to what % of everything spawned so far has been purged,
+// not a fixed kill count - so it scales with however hard the bloom gets.
+const MILESTONES = [
+  { pct:20, label:'20% PURGED — FIRST AID',   reward:()=>{ player.health = Math.min(player.maxHealth, player.health+25); } },
+  { pct:40, label:'40% PURGED — RAPID DOSE',  reward:()=>{ player.fireRate = Math.max(0.11, player.fireRate*0.8); } },
+  { pct:60, label:'60% PURGED — IMMUNE BOOST',reward:()=>{ player.maxHealth += 25; player.health = player.maxHealth; } },
+  { pct:80, label:'80% PURGED — POTENT DOSE', reward:()=>{ player.bulletDamage += 12; } },
+];
+function checkMilestones(){
+  const totalAlive = enemies.filter(e=>e.alive).length;
+  const total = killCount + totalAlive;
+  if (total < 4) return; // wait until there's an actual outbreak to measure
+  const pct = (killCount/total)*100;
+  MILESTONES.forEach(m=>{
+    if (pct >= m.pct && !milestonesHit.has(m.pct)){
+      milestonesHit.add(m.pct);
+      m.reward();
+      milestoneMsg = m.label;
+      milestoneMsgTimer = 2.8;
+      burst(W/2, H*0.3, '#00ff99', 22);
+      sfxPickup();
+    }
+  });
+}
+
+function handleMovement(dt){
+  let mx=0,my=0;
+  if (keys['KeyW']||keys['ArrowUp']) { mx+=Math.cos(player.angle); my+=Math.sin(player.angle); }
+  if (keys['KeyS']||keys['ArrowDown']) { mx-=Math.cos(player.angle); my-=Math.sin(player.angle); }
+  if (keys['KeyA']) { mx+=Math.cos(player.angle-Math.PI/2); my+=Math.sin(player.angle-Math.PI/2); }
+  if (keys['KeyD']) { mx+=Math.cos(player.angle+Math.PI/2); my+=Math.sin(player.angle+Math.PI/2); }
+  const len = Math.hypot(mx,my);
+  const moving = len>0.001;
+  if (moving){ mx/=len; my/=len; walkCycle += dt*6; }
+  const spd = player.speed * player.speedMult * dt;
+  const nx = player.x + mx*spd, ny = player.y + my*spd;
+  const pad = 0.22;
+  if (!isWall(nx+Math.sign(mx)*pad, player.y) ) player.x = nx;
+  if (!isWall(player.x, ny+Math.sign(my)*pad) ) player.y = ny;
+  if (keys['ArrowLeft']) player.angle -= 1.8*dt;
+  if (keys['ArrowRight']) player.angle += 1.8*dt;
+
+  const targetTilt = ((keys['KeyD']?1:0)-(keys['KeyA']?1:0)) * 0.035;
+  player.tilt += (targetTilt-player.tilt)*Math.min(1,dt*8);
+}
+
+// ---------- GAME OVER ----------
+function endGame(win, msg){
+  ended = true; running=false;
+  document.exitPointerLock && document.exitPointerLock();
+  const endOverlay = document.getElementById('endOverlay');
+  const endTitle = document.getElementById('endTitle');
+  const endStats = document.getElementById('endStats');
+  endTitle.textContent = win ? 'BODY CLEANSED' : 'HOST OVERWHELMED';
+  endTitle.className = 'neonTitle ' + (win?'endTitleWin':'endTitleLose');
+  endStats.innerHTML = `${msg}<br><br>Germs purged: <span>${killCount}</span> &nbsp;|&nbsp; Time survived: <span>${Math.floor(elapsed)}s</span>`;
+  endOverlay.classList.remove('hidden');
+}
+
+function checkWinLose(){
+  if (player.health<=0){ endGame(false, 'Your defenses have collapsed.'); return; }
+  if (elapsed>=60){ endGame(false, 'The infection bloomed past containment.'); return; }
+  if (spawnCount>0 && enemies.length>0 && enemies.filter(e=>e.alive).length===0){
+    endGame(true, 'Every last germ has been purged from the system.');
+  }
+}
+
+// ---------- MAIN LOOP ----------
+let lastTime = performance.now();
+function loop(now){
+  const dt = Math.min(0.05, (now-lastTime)/1000);
+  lastTime = now;
+  requestAnimationFrame(loop);
+
+  if (running && !ended){
+    elapsed += dt;
+    handleMovement(dt);
+    updateEnemies(dt);
+    updateBloom();
+    updatePickups(dt);
+    updateTimers(dt);
+    updateRadarPing(dt);
+    updateParticles(dt);
+    checkMilestones();
+    checkWinLose();
+  }
+
+  muzzleFlash = Math.max(0, muzzleFlash-dt*6);
+  weaponRecoil = Math.max(0, weaponRecoil-dt*5);
+  shakeMag = Math.max(0, shakeMag-dt*24);
+  milestoneMsgTimer = Math.max(0, milestoneMsgTimer-dt);
+
+  render();
+}
+
+function render(){
+  ctx.save();
+  const sx = (Math.random()-0.5)*shakeMag;
+  const sy = (Math.random()-0.5)*shakeMag;
+  ctx.translate(W/2+sx, H/2+sy);
+  ctx.rotate(player.tilt);
+  ctx.translate(-W/2, -H/2);
+
+  drawScene();
+  drawSprites();
+  drawParticles();
+
+  ctx.restore();
+
+  // vignette + scanlines (fixed, no shake)
+  const vg = ctx.createRadialGradient(W/2,H/2,H*0.25,W/2,H/2,H*0.75);
+  vg.addColorStop(0,'rgba(0,0,0,0)');
+  vg.addColorStop(1,'rgba(30,0,0,0.6)');
+  ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(0,0,0,0.08)';
+  for (let y=0;y<H;y+=2) ctx.fillRect(0,y,W,1);
+
+  drawWeapon();
+  drawHUD();
+}
+
+// ---------- BOOTSTRAP ----------
+resetState();
+requestAnimationFrame(loop);
+
+document.getElementById('startBtn').addEventListener('click', ()=>{
+  if (!actx) initAudio();
+  document.getElementById('startOverlay').classList.add('hidden');
+  running = true;
+  canvas.requestPointerLock();
+});
+document.getElementById('restartBtn').addEventListener('click', ()=>{
+  document.getElementById('endOverlay').classList.add('hidden');
+  resetState();
+  running = true;
+  canvas.requestPointerLock();
+});
+
+})();
+</script>
+</body>
+</html>

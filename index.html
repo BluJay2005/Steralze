@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CELLULAR PURGE // beta v8</title>
+<title>CELLULAR PURGE // beta v9 (Horde Upgrade)</title>
 <style>
   * { box-sizing: border-box; -webkit-user-select:none; user-select:none; }
   html, body {
@@ -185,11 +185,11 @@ const SAFE_SPAWNS = [ {x:4.5,y:4.5},{x:20.5,y:4.5},{x:4.5,y:20.5},{x:20.5,y:20.5
 
 // ---------- CONSTANTS ----------
 const FOV = 1.35;
-const MAX_ENEMIES = 18; 
+const MAX_ENEMIES = 45; // Increased spawn cap for Horde mode
 const ENEMY_TYPES = {
-  virus:    { hp:34,  speed:1.3, dmg:6,  radius:0.32, color:'#FF00FF' },
-  bacteria: { hp:90,  speed:0.8, dmg:10, radius:0.4,  color:'#00FFFF' },
-  spore:    { hp:20,  speed:2.2, dmg:4,  radius:0.24, color:'#FFFFFF' },
+  virus:    { hp:34,  speed:1.8, dmg:6,  radius:0.32, color:'#FF00FF' }, // Sped up
+  bacteria: { hp:90,  speed:1.0, dmg:10, radius:0.4,  color:'#00FFFF' }, // Sped up
+  spore:    { hp:15,  speed:3.5, dmg:4,  radius:0.24, color:'#FFFFFF' }, // Lightning fast swarmer
 };
 const PICKUP_STYLE = { 
   tylenol: {color:'#00FFFF', label:'+'}, 
@@ -223,6 +223,7 @@ const sfxDeath = ()=>beep(320,0.18,'sawtooth',0.16,40);
 const sfxPickup= ()=>beep(660,0.12,'sine',0.16,1200);
 const sfxHeart = ()=>beep(90,0.14,'sine',0.22,60);
 const sfxEnemyShoot = ()=>beep(440,0.1,'triangle',0.1,110);
+const sfxHurt  = ()=>beep(120,0.25,'sawtooth',0.3,50); // Added missing function
 
 // ---------- STATE ----------
 let player, enemies, projectiles, pickups, particles, zBuffer;
@@ -662,12 +663,13 @@ function processKill(e) {
     e.alive = false; killCount++;
     burst(e._screenX, e._screenY, '#ffffff', 15); sfxDeath();
     
-    if (Math.random() < 0.15 || enemies.filter(x=>x.alive).length < 2) {
-       for (let i=0; i<2; i++){
-          if (enemies.filter(x=>x.alive).length < MAX_ENEMIES) {
-             spawnEnemyNear({type: e.type, x: e.x, y: e.y});
-          }
-       }
+    // Hydra effect
+    if (e.type === 'bacteria' && enemies.filter(x=>x.alive).length < MAX_ENEMIES) {
+        spawnEnemyNear({type: 'spore', x: e.x, y: e.y});
+        spawnEnemyNear({type: 'spore', x: e.x, y: e.y});
+    } 
+    else if (Math.random() < 0.30 && enemies.filter(x=>x.alive).length < MAX_ENEMIES) {
+        spawnEnemyNear({type: 'virus', x: e.x, y: e.y});
     }
 }
 
@@ -752,17 +754,20 @@ function updateEnemies(dt){
     if (e.hitCooldown>0) e.hitCooldown -= dt;
     if (e.shootCooldown>0) e.shootCooldown -= dt;
     
-    // Enemies slowly scale up to 20% faster as the clock hits 60 seconds
-    const spd = e.speed * (e.slowTimer>0 ? 0.4 : 1) * (1 + (elapsed/60)*0.2);
+    // Speed scales aggressively towards the end
+    const spd = e.speed * (e.slowTimer>0 ? 0.4 : 1) * (1 + (elapsed/60)*0.80);
     
     const dx=player.x-e.x, dy=player.y-e.y;
     const dist=Math.sqrt(dx*dx+dy*dy);
 
-    if (dist < e.radius+0.35){
-      if (e.hitCooldown<=0){
-        player.health -= e.dmg*player.defenseMult; e.hitCooldown = 0.7;
-        shakeMag = Math.max(shakeMag,8); sfxHurt();
-        ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+    // Melee attack logic
+    if (dist < e.radius + 0.85){
+      if (e.hitCooldown <= 0){
+        player.health -= e.dmg * player.defenseMult; 
+        e.hitCooldown = 0.35; 
+        shakeMag = Math.max(shakeMag, 12); 
+        sfxHurt();
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.4)'; 
         ctx.fillRect(0,0,W,H);
       }
       return;
@@ -771,11 +776,21 @@ function updateEnemies(dt){
     let moveAngle;
     if (hasLineOfSight(e)){
       moveAngle = Math.atan2(dy,dx);
-      if (e.shootCooldown <= 0 && dist > 2.0 && dist < 12.0) {
-        e.shootCooldown = Math.random() * 2 + 1.5;
-        const pVx = -Math.cos(moveAngle) * 5;
-        const pVy = -Math.sin(moveAngle) * 5;
-        projectiles.push({ x:e.x, y:e.y, vx:pVx, vy:pVy, active:true, radius:0.1, dmg:8 });
+      // Projectile attack logic
+      if (e.shootCooldown <= 0 && dist > 2.0 && dist < 15.0) {
+        e.shootCooldown = Math.random() * 1.5 + 1.0; 
+        const projSpeed = 7 + (elapsed/60)*5; 
+        const angles = [moveAngle - 0.15, moveAngle, moveAngle + 0.15];
+        angles.forEach(ang => {
+            projectiles.push({ 
+                x: e.x, y: e.y, 
+                vx: -Math.cos(ang) * projSpeed, 
+                vy: -Math.sin(ang) * projSpeed, 
+                active: true, 
+                radius: 0.15, 
+                dmg: 8 
+            });
+        });
         sfxEnemyShoot();
       }
     } else {
@@ -805,18 +820,23 @@ function updateProjectiles(dt){
 }
 
 function updateBloom(dt){
-  if (elapsed >= nextBloomTime && totalSpawned < 150){
+  // Cluster spawning with increased capacity
+  if (elapsed >= nextBloomTime && totalSpawned < 250){ 
     let active = enemies.filter(e=>e.alive);
     if (active.length < MAX_ENEMIES) {
        const s = SAFE_SPAWNS[Math.floor(Math.random()*SAFE_SPAWNS.length)];
-       spawnEnemy(Math.random()<0.3 ? 'bacteria' : 'virus', s.x + (Math.random()-0.5)*2, s.y + (Math.random()-0.5)*2);
+       let clusterSize = 2 + Math.floor(elapsed / 20); 
+       for(let i=0; i<clusterSize; i++) {
+           spawnEnemy(Math.random()<0.3 ? 'bacteria' : 'virus', s.x + (Math.random()-0.5)*2, s.y + (Math.random()-0.5)*2);
+       }
     }
-    nextBloomTime = elapsed + (2.5 - (elapsed/60)*2.2); 
+    nextBloomTime = elapsed + Math.max(0.5, 2.5 - (elapsed/60)*2.0); 
   }
   
+  // Passive replication
   enemies.forEach(e => {
      if (e.alive && (elapsed - e.spawnTime) > 8.0) {
-        if (Math.random() < 0.10 * dt) {
+        if (Math.random() < 0.15 * dt) { 
            spawnEnemyNear(e);
            e.spawnTime = elapsed;
         }

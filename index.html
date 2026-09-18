@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CELLULAR PURGE // beta v9 (Horde Upgrade)</title>
+<title>CELLULAR PURGE // beta v10 (Melee & Health Update)</title>
 <style>
   * { box-sizing: border-box; -webkit-user-select:none; user-select:none; }
   html, body {
@@ -128,8 +128,8 @@
     <div class="instructions">
       <b>DIRECTIVE:</b> Cleanse every germ before the <b>60 SECOND</b> clock expires.<br>
       <b>MOBILITY:</b> <span class="key">W A S D</span> to move &nbsp;•&nbsp; <span class="key">MOUSE</span> to aim<br>
-      <b>COMBAT:</b> <span class="key">HOLD CLICK</span> or <span class="key">SPACE</span> to fire<br>
-      <b>ARSENAL:</b> Locate glowing beacons for <b>Rifle</b> (Auto), <b>Shotgun</b> (Spread), and <b>Grenade</b> (AOE). Tactical meds increase Defense & Speed.<br>
+      <b>COMBAT:</b> <span class="key">LEFT CLICK</span> to fire &nbsp;•&nbsp; <span class="key">RIGHT CLICK</span> to melee punch & heal!<br>
+      <b>ARSENAL:</b> Locate glowing beacons for Medkits (+HP), Rifle, Shotgun, and Grenade. Tactical meds increase Defense & Speed.<br>
     </div>
     <button class="neonBtn" id="startBtn">INITIATE PURGE</button>
   </div>
@@ -185,14 +185,15 @@ const SAFE_SPAWNS = [ {x:4.5,y:4.5},{x:20.5,y:4.5},{x:4.5,y:20.5},{x:20.5,y:20.5
 
 // ---------- CONSTANTS ----------
 const FOV = 1.35;
-const MAX_ENEMIES = 45; // Increased spawn cap for Horde mode
+const MAX_ENEMIES = 45; 
 const ENEMY_TYPES = {
-  virus:    { hp:34,  speed:1.8, dmg:6,  radius:0.32, color:'#FF00FF' }, // Sped up
-  bacteria: { hp:90,  speed:1.0, dmg:10, radius:0.4,  color:'#00FFFF' }, // Sped up
-  spore:    { hp:15,  speed:3.5, dmg:4,  radius:0.24, color:'#FFFFFF' }, // Lightning fast swarmer
+  virus:    { hp:34,  speed:1.8, dmg:6,  radius:0.32, color:'#FF00FF' },
+  bacteria: { hp:90,  speed:1.0, dmg:10, radius:0.4,  color:'#00FFFF' },
+  spore:    { hp:15,  speed:3.5, dmg:4,  radius:0.24, color:'#FFFFFF' },
 };
 const PICKUP_STYLE = { 
-  tylenol: {color:'#00FFFF', label:'+'}, 
+  medkit:  {color:'#55FF00', label:'+'}, 
+  tylenol: {color:'#00FFFF', label:'D'}, 
   stim:    {color:'#FFFF00', label:'\u26A1'}, 
   nyquil:  {color:'#AA66FF', label:'Z'},
   rifle:   {color:'#FF8800', label:'R'},
@@ -223,14 +224,15 @@ const sfxDeath = ()=>beep(320,0.18,'sawtooth',0.16,40);
 const sfxPickup= ()=>beep(660,0.12,'sine',0.16,1200);
 const sfxHeart = ()=>beep(90,0.14,'sine',0.22,60);
 const sfxEnemyShoot = ()=>beep(440,0.1,'triangle',0.1,110);
-const sfxHurt  = ()=>beep(120,0.25,'sawtooth',0.3,50); // Added missing function
+const sfxHurt  = ()=>beep(120,0.25,'sawtooth',0.3,50);
+const sfxPunch = ()=>beep(150,0.15,'sawtooth',0.25,40);
 
 // ---------- STATE ----------
 let player, enemies, projectiles, pickups, particles, zBuffer;
 let elapsed, running, ended, pointerLocked, isShooting;
 let nextBloomTime, nextPingTime, nextPickupTime, pulseAlpha;
 let walkCycle, muzzleFlash, weaponRecoil, shakeMag, killCount, totalSpawned, enemyIdSeed;
-let lastShotTime, milestonesHit, milestoneMsg, milestoneMsgTimer;
+let lastShotTime, lastMeleeTime, milestonesHit, milestoneMsg, milestoneMsgTimer;
 
 function resetState(){
   player = {
@@ -248,7 +250,7 @@ function resetState(){
   nextBloomTime=2.0; nextPingTime=2; nextPickupTime=6;
   pulseAlpha=0; 
   walkCycle=0; muzzleFlash=0; weaponRecoil=0; shakeMag=0;
-  killCount=0; totalSpawned=0; enemyIdSeed=1; lastShotTime=-99;
+  killCount=0; totalSpawned=0; enemyIdSeed=1; lastShotTime=-99; lastMeleeTime=-99;
   milestonesHit = new Set(); milestoneMsg=''; milestoneMsgTimer=0;
 
   spawnEnemy('virus', SAFE_SPAWNS[0].x, SAFE_SPAWNS[0].y);
@@ -294,8 +296,14 @@ window.addEventListener('keyup', e=>{
   keys[e.code]=false; 
   if (e.code==='Space') isShooting = false; 
 });
-canvas.addEventListener('mousedown', ()=>{ isShooting = true; });
-canvas.addEventListener('mouseup', ()=>{ isShooting = false; });
+canvas.addEventListener('contextmenu', e=>e.preventDefault());
+canvas.addEventListener('mousedown', e=>{
+  if (e.button === 0) isShooting = true;
+  if (e.button === 2) tryMelee();
+});
+canvas.addEventListener('mouseup', e=>{
+  if (e.button === 0) isShooting = false;
+});
 
 canvas.addEventListener('mousemove', e=>{
   if (!running) return;
@@ -663,7 +671,6 @@ function processKill(e) {
     e.alive = false; killCount++;
     burst(e._screenX, e._screenY, '#ffffff', 15); sfxDeath();
     
-    // Hydra effect
     if (e.type === 'bacteria' && enemies.filter(x=>x.alive).length < MAX_ENEMIES) {
         spawnEnemyNear({type: 'spore', x: e.x, y: e.y});
         spawnEnemyNear({type: 'spore', x: e.x, y: e.y});
@@ -737,6 +744,36 @@ function tryShoot(){
   }
 }
 
+// ---------- RIGHT CLICK MELEE PUNCH ----------
+function tryMelee(){
+  if (!running || ended) return;
+  if (elapsed - lastMeleeTime < 0.6) return; // 0.6s cooldown
+  lastMeleeTime = elapsed;
+  
+  sfxPunch();
+  shakeMag = Math.max(shakeMag, 14);
+  weaponRecoil = 1.2;
+  burst(W/2, H/2 + 20, '#55FF00', 25, 2.0);
+
+  let hitAny = false;
+  enemies.forEach(e => {
+    if (!e.alive) return;
+    const proj = worldToScreen(e.x, e.y);
+    // Melee range check (close proximity & within crosshair cone)
+    if (proj.corrected < 2.2 && Math.abs(proj.a) < 0.45) {
+      e.hp -= 100; // Heavy punch damage
+      hitAny = true;
+      burst(e._screenX, e._screenY, '#55FF00', 30);
+      if (e.hp <= 0) processKill(e);
+    }
+  });
+
+  if (hitAny) {
+    player.health = Math.min(player.maxHealth, player.health + 20); // Heal player on successful punch!
+    sfxPickup();
+  }
+}
+
 function hasLineOfSight(e){
   const steps = 14;
   for (let i=1;i<steps;i++){
@@ -754,13 +791,11 @@ function updateEnemies(dt){
     if (e.hitCooldown>0) e.hitCooldown -= dt;
     if (e.shootCooldown>0) e.shootCooldown -= dt;
     
-    // Speed scales aggressively towards the end
     const spd = e.speed * (e.slowTimer>0 ? 0.4 : 1) * (1 + (elapsed/60)*0.80);
     
     const dx=player.x-e.x, dy=player.y-e.y;
     const dist=Math.sqrt(dx*dx+dy*dy);
 
-    // Melee attack logic
     if (dist < e.radius + 0.85){
       if (e.hitCooldown <= 0){
         player.health -= e.dmg * player.defenseMult; 
@@ -776,7 +811,6 @@ function updateEnemies(dt){
     let moveAngle;
     if (hasLineOfSight(e)){
       moveAngle = Math.atan2(dy,dx);
-      // Projectile attack logic
       if (e.shootCooldown <= 0 && dist > 2.0 && dist < 15.0) {
         e.shootCooldown = Math.random() * 1.5 + 1.0; 
         const projSpeed = 7 + (elapsed/60)*5; 
@@ -820,7 +854,6 @@ function updateProjectiles(dt){
 }
 
 function updateBloom(dt){
-  // Cluster spawning with increased capacity
   if (elapsed >= nextBloomTime && totalSpawned < 250){ 
     let active = enemies.filter(e=>e.alive);
     if (active.length < MAX_ENEMIES) {
@@ -833,7 +866,6 @@ function updateBloom(dt){
     nextBloomTime = elapsed + Math.max(0.5, 2.5 - (elapsed/60)*2.0); 
   }
   
-  // Passive replication
   enemies.forEach(e => {
      if (e.alive && (elapsed - e.spawnTime) > 8.0) {
         if (Math.random() < 0.15 * dt) { 
@@ -848,7 +880,7 @@ function updatePickups(dt){
   if (elapsed >= nextPickupTime && pickups.filter(p=>!p.taken).length < 4){
     nextPickupTime += 8 + Math.random()*3;
     const room = ROOM_CENTERS[Math.floor(Math.random()*ROOM_CENTERS.length)];
-    const types = ['tylenol','stim','nyquil','rifle','shotgun','grenade']; 
+    const types = ['medkit','medkit','tylenol','stim','nyquil','rifle','shotgun','grenade']; 
     const type = types[Math.floor(Math.random()*types.length)];
     let px = room.x + (Math.random()-0.5)*1.6, py = room.y + (Math.random()-0.5)*1.6;
     if (isWall(px,py)){ px=room.x; py=room.y; }
@@ -859,6 +891,7 @@ function updatePickups(dt){
     const dx=player.x-p.x, dy=player.y-p.y;
     if (dx*dx+dy*dy < 0.4*0.4){ 
       p.taken = true; sfxPickup();
+      if (p.type==='medkit'){ player.health = Math.min(player.maxHealth, player.health + 40); }
       if (p.type==='tylenol'){ player.defenseMult=0.5; player.tylenolTimer=10; }
       if (p.type==='stim'){ player.speedMult=1.7; player.stimTimer=10; }
       if (p.type==='nyquil'){ enemies.forEach(e=>{ if(e.alive) e.slowTimer=8; }); }

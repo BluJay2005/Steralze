@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CELLULAR PURGE // beta v7</title>
+<title>CELLULAR PURGE // beta v8</title>
 <style>
   * { box-sizing: border-box; -webkit-user-select:none; user-select:none; }
   html, body {
@@ -243,6 +243,7 @@ function resetState(){
   enemies=[]; projectiles=[]; pickups=[]; particles=[];
   zBuffer=new Array(W).fill(99);
   elapsed=0; running=false; ended=false; isShooting=false;
+  pointerLocked=false;
   nextBloomTime=2.0; nextPingTime=2; nextPickupTime=6;
   pulseAlpha=0; 
   walkCycle=0; muzzleFlash=0; weaponRecoil=0; shakeMag=0;
@@ -252,7 +253,7 @@ function resetState(){
   spawnEnemy('virus', SAFE_SPAWNS[0].x, SAFE_SPAWNS[0].y);
   spawnEnemy('virus', SAFE_SPAWNS[1].x, SAFE_SPAWNS[1].y);
   spawnEnemy('virus', SAFE_SPAWNS[2].x, SAFE_SPAWNS[2].y);
-  spawnEnemy('virus', 12.5, 8.5);
+  spawnEnemy('virus', 12.5, 9.0); 
   spawnEnemy('virus', 12.5, 16.5);
 }
 
@@ -294,17 +295,20 @@ window.addEventListener('keyup', e=>{
 });
 canvas.addEventListener('mousedown', ()=>{ isShooting = true; });
 canvas.addEventListener('mouseup', ()=>{ isShooting = false; });
+
 canvas.addEventListener('mousemove', e=>{
-  if (!pointerLocked || !running) return;
+  if (!running) return;
   player.angle += (e.movementX||0) * 0.0026;
 });
+
 document.addEventListener('pointerlockchange', ()=>{
-  pointerLocked = document.pointerLockElement === canvas;
-  if (!pointerLocked && running && !ended){
+  const isLocked = document.pointerLockElement === canvas;
+  if (pointerLocked && !isLocked && running && !ended){
     running=false; isShooting=false;
     document.getElementById('startOverlay').classList.remove('hidden');
-    document.getElementById('startBtn').textContent='CLICK TO RESUME';
+    document.getElementById('startBtn').textContent='SYSTEM PAUSED - CLICK TO RESUME';
   }
+  pointerLocked = isLocked;
 });
 
 // ---------- RAYCAST ----------
@@ -905,7 +909,9 @@ function handleMovement(dt){
 // ---------- GAME OVER ----------
 function endGame(win, msg){
   ended = true; running=false; isShooting=false;
-  document.exitPointerLock && document.exitPointerLock();
+  if (document.exitPointerLock) {
+      try { document.exitPointerLock(); } catch(e) {}
+  }
   const endOverlay = document.getElementById('endOverlay');
   const endTitle = document.getElementById('endTitle');
   const endStats = document.getElementById('endStats');
@@ -948,10 +954,7 @@ function loop(now){
     handleMovement(dt);
     updateEnemies(dt);
     updateProjectiles(dt);
-    
-    // Fixed dt parameter here
     updateBloom(dt);
-    
     updatePickups(dt);
     updateTimers(dt);
     updateRadarPing(dt);
@@ -990,11 +993,13 @@ requestAnimationFrame(loop);
 document.getElementById('startBtn').addEventListener('click', ()=>{
   if (!actx) initAudio();
   document.getElementById('startOverlay').classList.add('hidden');
-  running = true; canvas.requestPointerLock();
+  running = true; 
+  try { canvas.requestPointerLock(); } catch(e) {}
 });
 document.getElementById('restartBtn').addEventListener('click', ()=>{
   document.getElementById('endOverlay').classList.add('hidden');
-  resetState(); running = true; canvas.requestPointerLock();
+  resetState(); running = true; 
+  try { canvas.requestPointerLock(); } catch(e) {}
 });
 
 })();

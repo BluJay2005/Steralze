@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CELLULAR PURGE // beta v6</title>
+<title>CELLULAR PURGE // beta v7</title>
 <style>
   * { box-sizing: border-box; -webkit-user-select:none; user-select:none; }
   html, body {
@@ -222,7 +222,6 @@ const sfxHit   = ()=>beep(180,0.08,'sawtooth',0.14,60);
 const sfxDeath = ()=>beep(320,0.18,'sawtooth',0.16,40);
 const sfxPickup= ()=>beep(660,0.12,'sine',0.16,1200);
 const sfxHeart = ()=>beep(90,0.14,'sine',0.22,60);
-const sfxHurt  = ()=>beep(140,0.12,'square',0.18,50);
 const sfxEnemyShoot = ()=>beep(440,0.1,'triangle',0.1,110);
 
 // ---------- STATE ----------
@@ -267,7 +266,7 @@ function spawnEnemy(type, x, y){
     type, x, y, hp:def.hp, maxHp:def.hp,
     speed:def.speed, dmg:def.dmg, radius:def.radius,
     alive:true, slowTimer:0, hitCooldown:0, shootCooldown:Math.random()*2+2, wanderAngle:Math.random()*Math.PI*2,
-    spawnTime: elapsed, // Track when this germ was born
+    spawnTime: elapsed, 
     _screenX:W/2,_screenY:H/2,_screenSize:0
   });
   totalSpawned++;
@@ -748,7 +747,10 @@ function updateEnemies(dt){
     if (e.slowTimer>0) e.slowTimer -= dt;
     if (e.hitCooldown>0) e.hitCooldown -= dt;
     if (e.shootCooldown>0) e.shootCooldown -= dt;
-    const spd = e.speed * (e.slowTimer>0 ? 0.4 : 1) * (climaxDone?1.15:1);
+    
+    // Enemies slowly scale up to 20% faster as the clock hits 60 seconds
+    const spd = e.speed * (e.slowTimer>0 ? 0.4 : 1) * (1 + (elapsed/60)*0.2);
+    
     const dx=player.x-e.x, dy=player.y-e.y;
     const dist=Math.sqrt(dx*dx+dy*dy);
 
@@ -799,24 +801,20 @@ function updateProjectiles(dt){
 }
 
 function updateBloom(dt){
-  // Ramp-up Spawning: Starts slow, gets exponentially faster towards 60s
   if (elapsed >= nextBloomTime && totalSpawned < 150){
     let active = enemies.filter(e=>e.alive);
     if (active.length < MAX_ENEMIES) {
        const s = SAFE_SPAWNS[Math.floor(Math.random()*SAFE_SPAWNS.length)];
        spawnEnemy(Math.random()<0.3 ? 'bacteria' : 'virus', s.x + (Math.random()-0.5)*2, s.y + (Math.random()-0.5)*2);
     }
-    // Spawn delay shrinks from 2.5 seconds down to 0.3 seconds at the climax
     nextBloomTime = elapsed + (2.5 - (elapsed/60)*2.2); 
   }
   
-  // Replenish/Duplicate mechanic: if germs live longer than 8s, they start multiplying
   enemies.forEach(e => {
      if (e.alive && (elapsed - e.spawnTime) > 8.0) {
-        // 10% chance per second to duplicate if left unpurged
         if (Math.random() < 0.10 * dt) {
            spawnEnemyNear(e);
-           e.spawnTime = elapsed; // Reset timer so it doesn't instantly duplicate again
+           e.spawnTime = elapsed;
         }
      }
   });
@@ -923,21 +921,19 @@ function checkWinLose(){
   if (elapsed>=60){ 
      const purgePct = (killCount / Math.max(1, totalSpawned)) * 100;
      
-     // 80% Purged (Leaves 20% for Bonus)
      if (purgePct >= 80) {
          endGame(true, `CRITICAL CONTAINMENT - BONUS RATING<br>Purged ${Math.floor(purgePct)}% of total infection.`);
      } 
-     // 70% Purged (Leaves 30% to Win)
      else if (purgePct >= 70) {
          endGame(true, `INFECTION CONTAINED<br>Purged ${Math.floor(purgePct)}% of total infection.`);
      } 
-     // Failure
      else {
          endGame(false, `CONTAINMENT FAILED<br>Only purged ${Math.floor(purgePct)}%. You must clear at least 70% to win.`);
      }
      return; 
   }
 }
+
 // ---------- MAIN LOOP ----------
 let lastTime = performance.now();
 function loop(now){
@@ -952,7 +948,10 @@ function loop(now){
     handleMovement(dt);
     updateEnemies(dt);
     updateProjectiles(dt);
-    updateBloom();
+    
+    // Fixed dt parameter here
+    updateBloom(dt);
+    
     updatePickups(dt);
     updateTimers(dt);
     updateRadarPing(dt);

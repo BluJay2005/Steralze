@@ -509,23 +509,17 @@ function drawWeapon(){
   ctx.shadowBlur = 20; ctx.shadowColor = aura;
 
   const img = document.getElementById('img-' + wType);
-  
-  // FIX 1: Reduce maximum scale limit from 180 to 120
   const wWidth = Math.min(W*0.25, 120); 
   const wHeight = wWidth;
   
   if (img && img.complete && img.naturalWidth !== 0) {
-    // FIX 2: Lower the Y offset multiplier from 0.8 to 0.55 to drop the gun 
     ctx.drawImage(img, -wWidth/2, -wHeight * 0.55, wWidth, wHeight);
   }
 
-  // Adjusted Muzzle Flash Position
   if (muzzleFlash > 0){
     ctx.shadowBlur = 0;
     ctx.globalCompositeOperation = 'screen';
     ctx.fillStyle = `rgba(255,255,255,${muzzleFlash})`;
-    
-    // FIX 3: Match flash Y-coordinates to the new lowered weapon height
     const flashY = -wHeight * 0.55 + 15;
     
     ctx.beginPath(); ctx.arc(0, flashY, 40*muzzleFlash, 0, Math.PI*2); ctx.fill();

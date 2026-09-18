@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CELLULAR PURGE // beta v5</title>
+<title>CELLULAR PURGE // beta v6</title>
 <style>
   * { box-sizing: border-box; -webkit-user-select:none; user-select:none; }
   html, body {
@@ -11,7 +11,6 @@
     font-family: 'Courier New', monospace; overflow:hidden;
   }
   
-  /* The animated biological background sits behind the transparent canvas */
   #gameContainer {
     position:relative;
     width:min(96vw, 1024px);
@@ -28,7 +27,6 @@
     100% { background: radial-gradient(circle at 50% 50%, #4a0011 0%, #000000 60%); }
   }
 
-  /* CRT Scanline Overlay */
   .crt::after {
     content: " ";
     display: block;
@@ -49,7 +47,6 @@
     z-index: 1;
   }
 
-  /* Retro UI Styling */
   .overlay {
     position:absolute; inset:0;
     background: rgba(0, 0, 0, 0.85);
@@ -111,13 +108,16 @@
 
 <!-- Hidden Image Loader for Inline Custom Sprites -->
 <div style="display:none;">
+  <!-- Enemies -->
   <img id="img-virus" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'><circle cx='50' cy='50' r='35' fill='%23FF00FF' stroke='%23000000' stroke-width='6'/><path d='M50 15 L50 5 M50 85 L50 95 M15 50 L5 50 M85 50 L95 50 M25 25 L15 15 M75 75 L85 85 M25 75 L15 85 M75 25 L85 15' stroke='%23FF00FF' stroke-width='6' stroke-linecap='round'/><circle cx='35' cy='45' r='6' fill='%23000000'/><circle cx='65' cy='45' r='6' fill='%23000000'/><path d='M 40 65 Q 50 75 60 65' fill='none' stroke='%23000000' stroke-width='5' stroke-linecap='round'/></svg>">
-  
   <img id="img-bacteria" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'><rect x='20' y='25' width='60' height='50' rx='25' fill='%2300FFFF' stroke='%23000000' stroke-width='6'/><circle cx='35' cy='45' r='5' fill='%23000000'/><circle cx='65' cy='45' r='5' fill='%23000000'/><line x1='35' y1='60' x2='65' y2='60' stroke='%23000000' stroke-width='5' stroke-linecap='round'/></svg>">
-  
   <img id="img-spore" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'><polygon points='50,15 85,80 15,80' fill='%23FFFFFF' stroke='%23FF0000' stroke-width='8' stroke-linejoin='round'/><circle cx='50' cy='60' r='10' fill='%23FF0000'/><polygon points='50,25 65,70 35,70' fill='none' stroke='%23FF0000' stroke-width='3'/></svg>">
   
-  <img id="img-weapon" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='300' viewBox='0 0 200 300'><rect x='70' y='120' width='60' height='180' fill='%23111111' stroke='%2300FFFF' stroke-width='6' rx='8'/><rect x='40' y='30' width='120' height='110' fill='%23FF00FF' stroke='%23000000' stroke-width='8' rx='12'/><rect x='85' y='5' width='30' height='35' fill='%23FFFFFF' stroke='%23000000' stroke-width='5' rx='3'/><line x1='60' y1='80' x2='140' y2='80' stroke='%23000000' stroke-width='8'/><line x1='60' y1='100' x2='140' y2='100' stroke='%23000000' stroke-width='8'/></svg>">
+  <!-- Weapons (Sized to not block the crosshair) -->
+  <img id="img-default" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 100 100'><polygon points='45,100 45,70 42,70 42,40 46,40 46,20 54,20 54,40 58,40 58,70 55,100' fill='%23111' stroke='%2300FFFF' stroke-width='2'/><rect x='47' y='25' width='6' height='15' fill='%2300FFFF'/></svg>">
+  <img id="img-rifle" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 100 100'><polygon points='35,100 42,60 38,60 38,10 62,10 62,60 58,60 65,100' fill='%23111' stroke='%23FF8800' stroke-width='2'/><line x1='45' y1='20' x2='45' y2='50' stroke='%23FF8800' stroke-width='2'/><line x1='55' y1='20' x2='55' y2='50' stroke='%23FF8800' stroke-width='2'/></svg>">
+  <img id="img-shotgun" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 100 100'><polygon points='25,100 35,50 30,50 30,20 70,20 70,50 65,50 75,100' fill='%23111' stroke='%23FF0055' stroke-width='2'/><rect x='35' y='25' width='30' height='20' fill='%23111' stroke='%23FF0055' stroke-width='2'/><circle cx='42' cy='35' r='4' fill='%23FF0055'/><circle cx='58' cy='35' r='4' fill='%23FF0055'/></svg>">
+  <img id="img-grenade" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 100 100'><polygon points='20,100 30,65 20,65 20,30 80,30 80,65 70,65 80,100' fill='%23111' stroke='%2355FF00' stroke-width='2'/><rect x='25' y='35' width='50' height='25' fill='%23111' stroke='%2355FF00' stroke-width='2'/><line x1='25' y1='47' x2='75' y2='47' stroke='%2355FF00' stroke-width='4'/></svg>">
 </div>
 
 <div id="gameContainer" class="crt">
@@ -324,7 +324,6 @@ function castRay(angle){
   }
   let dist = (side===0) ? (mapX-player.x+(1-stepX)/2)/dirX : (mapY-player.y+(1-stepY)/2)/dirY;
   
-  // Calculate exact wall intersection point for texture mapping
   let texX = (side === 0) ? (player.y + dist * dirY) : (player.x + dist * dirX);
   texX -= Math.floor(texX);
   
@@ -332,10 +331,8 @@ function castRay(angle){
 }
 
 function drawScene(){
-  // Clear ceiling entirely so the biological CSS background shows through
   ctx.clearRect(0, 0, W, H/2);
 
-  // High-contrast neon floor grid
   const floorGrad = ctx.createLinearGradient(0, H/2, 0, H);
   floorGrad.addColorStop(0, '#110011');
   floorGrad.addColorStop(1, '#000000');
@@ -355,17 +352,13 @@ function drawScene(){
     const neonColor = r.side === 0 ? [0, 255, 255] : [255, 0, 255];
     const dimColor = [neonColor[0]*0.15, neonColor[1]*0.15, neonColor[2]*0.15];
 
-    // Wireframe wall rendering logic (pure black walls, neon edges)
     if (r.texX < 0.03 || r.texX > 0.97) {
-      // Bright vertical neon struts
       ctx.fillStyle = `rgb(${neonColor[0]*fog}, ${neonColor[1]*fog}, ${neonColor[2]*fog})`;
       ctx.fillRect(col, drawStart, 1, wallHeight);
     } else {
-      // Pitch black wall interior with dim lighting
       ctx.fillStyle = `rgb(${dimColor[0]*fog}, ${dimColor[1]*fog}, ${dimColor[2]*fog})`;
       ctx.fillRect(col, drawStart, 1, wallHeight);
       
-      // Top and bottom horizontal neon caps
       ctx.fillStyle = `rgb(${neonColor[0]*fog}, ${neonColor[1]*fog}, ${neonColor[2]*fog})`;
       ctx.fillRect(col, drawStart, 1, 3);
       ctx.fillRect(col, drawStart + wallHeight - 3, 1, 3);
@@ -422,10 +415,8 @@ function drawEnemySprite(e, sx, sy, size){
 
   const img = document.getElementById('img-' + e.type);
   if (img && img.complete && img.naturalWidth !== 0) {
-    // Draw dedicated sprite image
     ctx.drawImage(img, -r, -r, r*2, r*2);
   } else {
-    // Fallback Geometrics if image fails
     ctx.fillStyle = '#000'; ctx.strokeStyle = ENEMY_TYPES[e.type].color;
     ctx.lineWidth = Math.max(2, size*0.04);
     if (e.type==='virus'){
@@ -438,7 +429,6 @@ function drawEnemySprite(e, sx, sy, size){
   }
   
   ctx.shadowBlur = 0;
-  // Floating Health Bar
   if (e.hp < e.maxHp){
     ctx.fillStyle='#000'; ctx.fillRect(-r*0.7, r*1.1, r*1.4, r*0.15);
     ctx.fillStyle='#00ff66'; ctx.fillRect(-r*0.7, r*1.1, r*1.4*Math.max(0,e.hp/e.maxHp), r*0.15);
@@ -461,7 +451,6 @@ function drawPickupSprite(p, sx, sy, size){
   const style = PICKUP_STYLE[p.type];
   
   ctx.save();
-  // Volumetric glowing beacon pillar
   const beaconH = H;
   const grad = ctx.createLinearGradient(0, sy+bob, 0, sy+bob - beaconH);
   grad.addColorStop(0, style.color);
@@ -504,40 +493,40 @@ function drawParticles(){
 
 // ---------- WEAPON ----------
 function drawWeapon(){
-  const bobX = Math.sin(walkCycle*2)*8; 
-  const bobY = Math.abs(Math.sin(walkCycle*2))*6;
+  const bobX = Math.sin(walkCycle*2)*4; 
+  const bobY = Math.abs(Math.sin(walkCycle*2))*4;
   ctx.save(); 
-  ctx.translate(W/2+bobX, H + bobY + weaponRecoil*20);
+  ctx.translate(W/2+bobX, H + bobY + weaponRecoil*10);
   
+  let wType = player.currentWeapon;
+  if (!['rifle', 'shotgun', 'grenade'].includes(wType)) wType = 'default';
+
   let aura = '#00FFFF'; 
-  if (player.currentWeapon === 'rifle') aura = '#FF8800';
-  if (player.currentWeapon === 'shotgun') aura = '#FF0055';
-  if (player.currentWeapon === 'grenade') aura = '#55FF00';
+  if (wType === 'rifle') aura = '#FF8800';
+  if (wType === 'shotgun') aura = '#FF0055';
+  if (wType === 'grenade') aura = '#55FF00';
 
-  ctx.shadowBlur = 25; ctx.shadowColor = aura;
+  ctx.shadowBlur = 20; ctx.shadowColor = aura;
 
-  const img = document.getElementById('img-weapon');
+  const img = document.getElementById('img-' + wType);
+  const wWidth = Math.min(W*0.35, 180); // Keep size small enough to not block crosshair
+  const wHeight = wWidth;
+  
   if (img && img.complete && img.naturalWidth !== 0) {
-    const wWidth = Math.min(W*0.6, 400); 
-    const wHeight = wWidth * (img.naturalHeight / img.naturalWidth);
-    ctx.drawImage(img, -wWidth/2, -wHeight + 10, wWidth, wHeight);
-  } else {
-    // Fallback geometric gun
-    ctx.fillStyle='#050505'; ctx.strokeStyle=aura; ctx.lineWidth=4;
-    ctx.beginPath(); ctx.moveTo(-20, -140); ctx.lineTo(20, -140); ctx.lineTo(30, 0); ctx.lineTo(-30, 0); ctx.closePath();
-    ctx.fill(); ctx.stroke();
-    ctx.fillStyle=aura; ctx.fillRect(-5, -150, 10, 15);
+    // Anchor sprite to the bottom of the screen, offset safely below the crosshair
+    ctx.drawImage(img, -wWidth/2, -wHeight * 0.8, wWidth, wHeight);
   }
 
-  // Muzzle Flash
+  // Adjusted Muzzle Flash Position
   if (muzzleFlash > 0){
     ctx.shadowBlur = 0;
     ctx.globalCompositeOperation = 'screen';
     ctx.fillStyle = `rgba(255,255,255,${muzzleFlash})`;
-    ctx.beginPath(); ctx.arc(0, -180, 50*muzzleFlash, 0, Math.PI*2); ctx.fill();
+    const flashY = -wHeight * 0.8 + 20;
+    ctx.beginPath(); ctx.arc(0, flashY, 40*muzzleFlash, 0, Math.PI*2); ctx.fill();
     
-    ctx.fillStyle = aura + Math.floor(muzzleFlash*200).toString(16).padStart(2,'0');
-    ctx.beginPath(); ctx.arc(0, -180, 80*muzzleFlash, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = aura + Math.floor(muzzleFlash*255).toString(16).padStart(2,'0');
+    ctx.beginPath(); ctx.arc(0, flashY, 70*muzzleFlash, 0, Math.PI*2); ctx.fill();
     ctx.globalCompositeOperation = 'source-over';
   }
   ctx.restore();
@@ -545,7 +534,6 @@ function drawWeapon(){
 
 // ---------- HUD ----------
 function drawHUD(){
-  // Timer bar (Top)
   const barW = Math.min(W*0.4, 300); const tx = (W-barW)/2;
   ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(tx, 12, barW, 16);
   ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.strokeRect(tx, 12, barW, 16);
@@ -563,12 +551,10 @@ function drawHUD(){
   ctx.fillText(`GERMS ACTIVE: ${remaining}   PURGED: ${killCount}`, W/2, 58);
   ctx.shadowBlur=0;
 
-  // Upgrade icons (Top left)
   let ix = 20; ctx.textAlign='left';
   if (player.tylenolTimer>0){ drawBadge(ix, 20, '#00FFFF', 'DEF'); ix+=56; }
   if (player.stimTimer>0){ drawBadge(ix, 20, '#FFFF00', 'SPD'); ix+=56; }
 
-  // Health bar (Bottom Center)
   const hpBarW = Math.min(W*0.5, 400); const hpX = (W - hpBarW)/2; const hpY = H - 30;
   ctx.fillStyle='rgba(0,0,0,0.7)'; ctx.fillRect(hpX, hpY, hpBarW, 18);
   ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.strokeRect(hpX, hpY, hpBarW, 18);
@@ -584,13 +570,11 @@ function drawHUD(){
 
   drawRadar();
 
-  // Milestone banner
   if (milestoneMsgTimer > 0){
     const a = Math.min(1, milestoneMsgTimer/0.5);
     ctx.save(); ctx.globalAlpha = a; 
     ctx.font='bold italic 22px monospace'; ctx.textAlign='center';
     
-    // Slanted tech text effect
     ctx.transform(1, 0, -0.2, 1, 0, 0); 
     
     ctx.shadowColor='#55FF00'; ctx.shadowBlur=20; ctx.fillStyle='#55FF00';
@@ -599,7 +583,7 @@ function drawHUD(){
     ctx.restore();
   }
 
-  // Neon Crosshair
+  // Neon Crosshair 
   ctx.strokeStyle = 'rgba(0, 255, 255, 0.9)';
   ctx.lineWidth = 2;
   ctx.shadowBlur = 8; ctx.shadowColor = '#00FFFF';
@@ -611,7 +595,6 @@ function drawHUD(){
   ctx.stroke();
   ctx.shadowBlur = 0;
 
-  // Weapon Timer
   if (player.weaponTimer > 0) {
     ctx.fillStyle = PICKUP_STYLE[player.currentWeapon].color; 
     ctx.font = 'bold italic 14px monospace'; 
@@ -677,7 +660,6 @@ function processKill(e) {
     e.alive = false; killCount++;
     burst(e._screenX, e._screenY, '#ffffff', 15); sfxDeath();
     
-    // Toned down panic swarm chance to fit 18-cap performance
     if (Math.random() < 0.15 || enemies.filter(x=>x.alive).length < 2) {
        for (let i=0; i<2; i++){
           if (enemies.filter(x=>x.alive).length < MAX_ENEMIES) {
@@ -775,7 +757,6 @@ function updateEnemies(dt){
       if (e.hitCooldown<=0){
         player.health -= e.dmg*player.defenseMult; e.hitCooldown = 0.7;
         shakeMag = Math.max(shakeMag,8); sfxHurt();
-        // Red flash overlay on taking damage
         ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
         ctx.fillRect(0,0,W,H);
       }
@@ -821,7 +802,6 @@ function updateProjectiles(dt){
 function updateBloom(){
   if (elapsed >= nextBloomTime){
     let active = enemies.filter(e=>e.alive);
-    // Flatter curve for manageable swarms
     let spawnLimit = Math.min(1, MAX_ENEMIES - active.length);
     for(let i=0; i<spawnLimit; i++) {
         if(active.length > 0) spawnEnemyNear(active[Math.floor(Math.random()*active.length)]);
@@ -862,7 +842,7 @@ function updatePickups(dt){
   pickups.forEach(p=>{
     if (p.taken) return;
     const dx=player.x-p.x, dy=player.y-p.y;
-    if (dx*dx+dy*dy < 0.4*0.4){ // Increased pickup radius slightly
+    if (dx*dx+dy*dy < 0.4*0.4){ 
       p.taken = true; sfxPickup();
       if (p.type==='tylenol'){ player.defenseMult=0.5; player.tylenolTimer=10; }
       if (p.type==='stim'){ player.speedMult=1.7; player.stimTimer=10; }
@@ -992,7 +972,6 @@ function render(){
   drawScene(); drawSprites(); drawParticles();
   ctx.restore();
 
-  // CRT Vignette rendering on canvas
   const vg = ctx.createRadialGradient(W/2,H/2,H*0.3,W/2,H/2,H*0.8);
   vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(5,0,5,0.7)');
   ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
